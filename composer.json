@@ -1,0 +1,25 @@
+{
+  "name": "php-kit/html5-tools",
+  "license": "MIT",
+  "description": "A collection of libraries for working with HTML5 markup",
+  "keywords": [
+    "html", "html5", "SAX", "parser", "syntax", "highlighter"
+  ],
+  "homepage": "https://github.com/php-kit/html5-tools",
+  "authors": [
+    {
+      "name": "Impactwave",
+      "email": "impactwave@impactwave.com",
+      "homepage": "http://impactwave.com"
+    },
+    {
+      "name": "Cláudio Silva",
+      "email": "claudio.silva@impactwave.com"
+    }
+  ],
+   "autoload": {
+    "psr-4": {
+      "PhpKit\\Html5Tools\\": "src"
+    }
+  }
+}
