@@ -13,6 +13,16 @@ A minimalistic and ultra-lightweight syntax highlighter for outputting readable 
 
 It supports markup fragments beginning and ending anywhere, even midway trough a tag or attribute.
 
+## Roadmap
+
+### Libraries that are planned for development
+
+#### An HTML5 (re)formatter
+
+A high performance streaming formatter of HTML5 markup.
+
+It outputs reformatted markup while reading and parsing an input HTML5 document or fragment, with no intermediate DOM and with very low memory usage.
+
 ## Instalation
 
 ### Requirements
