@@ -1,31 +1,19 @@
 <?php
 namespace PhpKit\Html5Tools;
 
+use PhpKit\Html5Tools\Interfaces\ParserObserverInterface;
 const PARSE_ATTR                = 'ATT';
 const PARSE_OPEN_TAG            = 'OPE';
 const PARSE_TAG_NAME_OR_COMMENT = 'TAG';
 const PARSE_TEXT                = 'TXT';
 const PARSE_VALUE_OR_ATTR       = 'VAT';
 
-/** Args: `string $tagName` */
-const OPEN_TAG_PARSED = 'TAG';
 /**
- * Args: `string $attrName, string [optional] $value, string [optional] $quote`
- * > `$value` is absent if the attribute has no value.<br>
- * > `$quote` is `"`, `'` or an empty string. It is absent if the attribute has no value.
+ * A streaming HTML5 parser.
+ *
+ * <p>The parser instances are meant to be used and then discarded, not to be reused or to be persistent in any way.
+ * You cannot parse markup with the same instance more than once.
  */
-const ATTR_PARSED = 'ATT';
-/** Args: `string $tagName, bool $autoClose` */
-const CLOSE_TAG_PARSED = 'CLO';
-/** Args: `string $text` */
-const TEXT_PARSED = 'TXT';
-/** Args: `string $comment` */
-const COMMENT_PARSED = 'COM';
-/** Args: `string $doctype` */
-const DOCTYPE_PARSED = 'DOC';
-/** Args: `string $space` */
-const WHITE_SPACE_PARSED = 'SPC';
-
 class HtmlParser
 {
   const IS_STARTING_INSIDE_TAG = <<<'REGEX'
@@ -56,7 +44,9 @@ REGEX
   (?P<t>
     /?              # optional /
     (?:             # either
-      ! .*? >       # HTML comment or PI
+      ! .*? >       # HTML comment or doctype
+      |             # or
+      \? .*? \?>    # XML Processing Instruction
       |             # or
       [\w\-\:]+     # tag name, with optional prefix
     )
@@ -102,46 +92,14 @@ REGEX
     ,
   ];
 
-  private $events = [
-    OPEN_TAG_PARSED    => [],
-    ATTR_PARSED        => [],
-    CLOSE_TAG_PARSED   => [],
-    TEXT_PARSED        => [],
-    COMMENT_PARSED     => [],
-    DOCTYPE_PARSED     => [],
-    WHITE_SPACE_PARSED => [],
-  ];
-
+  /**
+   * @var ParserObserverInterface
+   */
+  private $observer = null;
+  /**
+   * @var string[]
+   */
   private $tagStack = [];
-
-  /**
-   * Calls the registered event listeners for a given event.
-   *
-   * @param string $event Event name. One of the XXX_PARSED constants.
-   * @param mixed  $args  [option] Event-specific arguments (for instance, a tag name).
-   */
-  function emmit ($event, ...$args)
-  {
-    foreach ($this->events[$event] as $listener)
-      $listener (...$args);
-  }
-
-  /**
-   * Registers an event listener.
-   *
-   * ><p>**Note:** there is no method to unregister a listener; the parser instances are meant to be used and then
-   * discarded, not to be reused or to be persistent in any way, so there is no use for event unregistration.
-   *
-   * @param string   $event    Event name. One of the XXX_PARSED constants.
-   * @param callable $listener The event listener callback.
-   */
-  function on ($event, callable $listener)
-  {
-    if (!isset($this->events[$event]))
-      throw new \InvalidArgumentException ("Invalid event: $event");
-
-    $this->events[$event][] = $listener;
-  }
 
   /**
    * Parses a block of HTML5 markup, calling the registered event listeners at each step of the parsing process.
@@ -152,26 +110,29 @@ REGEX
    * the original document, even at invalid locations (ex. midway a tag or attribute). The way the parser handles an
    * invalid starting location is to consider the initial markup to be plain text until a valid tag begins.
    *
-   * <p>XML Processing Instruction (PI) are parsed as HTML comments, **except** for DOCTYPE declarations.
+   * ><p>**Note:** XML Processing Instructions (ex. `<?name value ?>`) and Markup Declarations other than DOCTYPE
+   * (ex. `<!something>`) are parsed as HTML comments, as they are not meaningful on the HTML5 grammar.
    *
    * @param string $html
    */
   function parse ($html)
   {
+    if (!$this->observer)
+      throw new \RuntimeException ("No parser observer was set");
     $state = PARSE_TEXT;
     $attr  = null;
 
     // Check if the input starts midway a tag.
     if (preg_match (self::IS_STARTING_INSIDE_TAG, $html, $m)) {
-      // Output markup up to the tag end as normal text, as we can't parse it correctly.
-      $this->emmit (TEXT_PARSED, $m[0]);
+      $this->observer->invalidMarkupParsed ($m[0]);
+      // Skip invalid/unrecognized markup to the next start of tag.
       $html = substr ($html, strlen ($m[0]));
     }
 
     while (preg_match (self::MATCH[$state], $html, $m)) {
 
       if (isset($m['s']))
-        $this->emmit (WHITE_SPACE_PARSED, $m['s']);
+        $this->observer->whiteSpaceParsed ($m['s']);
 
       $v = $m['t'];
 
@@ -180,10 +141,10 @@ REGEX
         case PARSE_ATTR:
           if ($v[0] == '/' || $v == '>') {
             if (isset($attr)) {
-              $this->emmit (ATTR_PARSED, $attr);
+              $this->observer->attrParsed ($attr);
               $attr = null;
             }
-            $this->emmit (CLOSE_TAG_PARSED, array_pop ($this->tagStack), $v[0] == '/');
+            $this->observer->closeTagParsed (array_pop ($this->tagStack), $v[0] == '/');
             $state = PARSE_TEXT;
           }
           else {
@@ -197,19 +158,21 @@ REGEX
           break;
 
         case PARSE_TAG_NAME_OR_COMMENT:
-          if ($v[0] == '!') {
-            $this->emmit (substr (strtoupper ($v), 0, 8) == '!DOCTYPE' ? DOCTYPE_PARSED : COMMENT_PARSED, "<$v");
+          if ($v[0] == '!' || $v[0] == '?') {
+            if (substr (strtoupper ($v), 0, 8) == '!DOCTYPE')
+              $this->observer->doctypeParsed ("<$v");
+            else $this->observer->commentParsed ("<$v");
             $state = PARSE_TEXT;
           }
           else {
             $this->tagStack[] = $v;
-            $this->emmit (OPEN_TAG_PARSED, $v);
+            $this->observer->openTagParsed ($v);
             $state = PARSE_ATTR;
           }
           break;
 
         case PARSE_TEXT:
-          $this->emmit (TEXT_PARSED, $v);
+          $this->observer->textParsed ($v);
           $state = PARSE_OPEN_TAG;
           break;
 
@@ -221,16 +184,16 @@ REGEX
               $q = '';
               $v = substr ($v, 1);
             }
-            $this->emmit (ATTR_PARSED, $attr, $v, $q);
+            $this->observer->attrParsed ($attr, $v, $q);
             $attr  = null;
             $state = PARSE_ATTR;
           }
           elseif ($v[0] == '/' || $v == '>') {
             if (isset($attr)) {
-              $this->emmit (ATTR_PARSED, $attr);
+              $this->observer->attrParsed ($attr);
               $attr = null;
             }
-            $this->emmit (CLOSE_TAG_PARSED, array_pop ($this->tagStack), $v[0] == '/');
+            $this->observer->closeTagParsed (array_pop ($this->tagStack), $v[0] == '/');
             $state = PARSE_TEXT;
           }
           else {
@@ -243,7 +206,17 @@ REGEX
     }
     // output remaining unparsed (syntactically invalid) markup
     if ($html !== '')
-      $this->emmit (TEXT_PARSED, $html);
+      $this->observer->invalidMarkupParsed ($html);
+  }
+
+  /**
+   * Registers a parser observer.
+   *
+   * @param ParserObserverInterface $observer
+   */
+  function setObserver (ParserObserverInterface $observer)
+  {
+    $this->observer = $observer;
   }
 
 }
