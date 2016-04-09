@@ -67,7 +67,7 @@ REGEX
   (?P<s> \s*)
   (?P<t>
     (?:                           # either
-      /? >                        # end of tag: /> or >
+      =? \s* /? >                 # end of tag: /> or > or =/> or =>
       |                           # or
       = \s* "[^"]* (?: " | $)     # ="quoted" or ="unclosed
       |                           # or
@@ -165,13 +165,20 @@ CSS;
 
         case self::EXPECT_VALUE_OR_ATTR:
           if ($v[0] == '=') {
-            $o .= '=<u val>' . substr ($e, 1) . '</u>';
-            $state = self::EXPECT_ATTR;
+            $v = ltrim (substr ($v, 1));
+            // Exclude => or =/>
+            if ($v === '' || ($v[0] != '/' && $v != '>')) {
+              $o .= '=<u val>' . substr ($e, 1) . '</u>';
+              $state = self::EXPECT_ATTR;
+              break;
+            }
           }
-          elseif ($v[0] == '/' || $v == '>') {
+          // If =/> or => or /> or >
+          if ($v === '' || $v[0] == '/' || $v == '>') {
             $o .= $e;
             $state = self::EXPECT_TEXT;
           }
+          // An attr value is present.
           else {
             $o .= "<u prop>$e</u>";
             // Keep the same state.

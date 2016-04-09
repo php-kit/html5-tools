@@ -76,7 +76,7 @@ REGEX
   (?P<s> \s*)
   (?P<t>
     (?:                           # either
-      /? >                        # end of tag: /> or >
+      =? \s* /? >                 # end of tag: /> or > or =/> or =>
       |                           # or
       = \s* "[^"]* (?: " | $)     # ="quoted" or ="unclosed
       |                           # or
@@ -178,17 +178,23 @@ REGEX
 
         case PARSE_VALUE_OR_ATTR:
           if ($v[0] == '=') {
-            if (($q = $v[1]) == '"' || $v[1] == "'")
-              $v = substr ($v, 2, -1);
-            else {
-              $q = '';
-              $v = substr ($v, 1);
+            $v = ltrim (substr ($v, 1));
+            // Exclude => or =/>
+            if ($v === '' || ($v[0] != '/' && $v != '>')) {
+              if (($q = $v[1]) == '"' || $v[1] == "'")
+                $v = substr ($v, 2, -1);
+              else {
+                $q = '';
+                $v = substr ($v, 1);
+              }
+              $this->observer->attrParsed ($attr, $v, $q);
+              $attr  = null;
+              $state = PARSE_ATTR;
+              break;
             }
-            $this->observer->attrParsed ($attr, $v, $q);
-            $attr  = null;
-            $state = PARSE_ATTR;
           }
-          elseif ($v[0] == '/' || $v == '>') {
+          // If =/> or => or /> or >
+          if ($v === '' || $v[0] == '/' || $v == '>') {
             if (isset($attr)) {
               $this->observer->attrParsed ($attr);
               $attr = null;
@@ -196,6 +202,7 @@ REGEX
             $this->observer->closeTagParsed (array_pop ($this->tagStack), $v[0] == '/');
             $state = PARSE_TEXT;
           }
+          // An attr value is present.
           else {
             $attr = $v;
             // Keep the same state.
